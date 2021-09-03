@@ -69,6 +69,7 @@ func main() {
 		}
 
 		time.Sleep(5 * time.Second)
+		dt := time.Now().Sub(start).Seconds()
 
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]
@@ -83,7 +84,6 @@ func main() {
 
 		for pkg, w := range packageCoresTotalEnergy {
 			w1 := packageTotalEnergy[pkg] / float64(len(coreMsrs))
-			dt := time.Now().Sub(start).Seconds()
 			output += fmt.Sprintf("cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w*energy_unit*dt)
 			output += fmt.Sprintf("cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w1*energy_unit*dt)
 		}

@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ const AMD_MSR_CORE_ENERGY = 0xC001029A
 const AMD_MSR_PACKAGE_ENERGY = 0xC001029B
 
 const AMD_ENERGY_UNIT_MASK = 0x1F00
+const AMD_ENERGY_VALUE_MASK = 0xFFFF
 
 const MAX_CORES = 1024
 
@@ -30,15 +32,21 @@ func readMsr(msr *os.File, offset int64) uint64 {
 }
 
 func main() {
+	outputDir := os.Getenv("TEMP") + "/prometheus"
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		log.Fatal(err)
+	}
+	outputFile := outputDir + "/epyc_power_collector.prom"
+
+	_, err := exec.Command("/usr/sbin/modprobe", "msr").Output()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	coreToPackageMap := make(map[int]int)
 	coreMsrs := make(map[int]*os.File)
 
 	for i := 0; i < MAX_CORES; i++ {
-		if i%2 == 1 {
-			// skip SMT threads
-			continue
-		}
-
 		t, err := ioutil.ReadFile("/sys/devices/system/cpu/cpu" + strconv.Itoa(i) + "/topology/physical_package_id")
 		if err != nil {
 			break
@@ -57,37 +65,49 @@ func main() {
 	))
 
 	for {
-		packageCoresTotalEnergy := make(map[int]float64)
-		packageTotalEnergy := make(map[int]float64)
+		coreEnergy := make(map[int]float64)
+		packageEnergy := make(map[int]float64)
 
 		start := time.Now()
 
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]
-			packageCoresTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
-			packageTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
+			coreEnergy[i] = float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			packageEnergy[pkg] = float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
 		}
 
 		time.Sleep(5 * time.Second)
 		dt := time.Now().Sub(start).Seconds()
 
+		rollover := false
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]
-			packageCoresTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
-			packageTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
+			coreEnergy[i] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			packageEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			if coreEnergy[i] > 0 || packageEnergy[pkg] > 0 {
+				// rollover - consider data invalid
+				rollover = true
+			}
 		}
 
-		output := "# HELP node_cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
-			"# TYPE node_cpu_power_cores_watts gauge\n" +
-			"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
-			"# TYPE node_cpu_power_package_watts gauge\n"
+		if !rollover {
+			output := "# HELP node_cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
+				"# TYPE node_cpu_power_cores_watts gauge\n" +
+				"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
+				"# TYPE node_cpu_power_package_watts gauge\n"
 
-		for pkg, w := range packageCoresTotalEnergy {
-			w1 := packageTotalEnergy[pkg] / float64(len(coreMsrs))
-			output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w*energyUnit/dt)
-			output += fmt.Sprintf("node_cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w1*energyUnit/dt)
+			for pkg, w := range packageEnergy {
+				output += fmt.Sprintf("node_cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w*energyUnit/dt)
+				w1 := 0.0
+				for core, w2 := range coreEnergy {
+					if coreToPackageMap[core] == pkg {
+						w1 += w2
+					}
+				}
+				output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w1*energyUnit/dt)
+			}
+
+			ioutil.WriteFile(outputFile, []byte(output), 0644)
 		}
-
-		ioutil.WriteFile("/tmp/prometheus/epyc_power_collector.prom", []byte(output), 0644)
 	}
 }

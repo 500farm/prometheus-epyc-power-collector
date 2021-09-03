@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -20,29 +21,36 @@ const AMD_POWER_UNIT_MASK = 0xF
 
 const MAX_CORES = 1024
 
-func readMsr(msr []byte, offset int) uint64 {
-	return binary.LittleEndian.Uint64(msr[offset : offset+8])
+func readMsr(msr *os.File, offset int64) uint64 {
+	buf := make([]byte, 8)
+	_, err := msr.ReadAt(buf, offset)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return binary.LittleEndian.Uint64(buf)
 }
 
 func main() {
 	coreToPackageMap := make(map[int]int)
-	coreMsrs := make(map[int][]byte)
+	coreMsrs := make(map[int]*os.File)
 
 	for i := 0; i < MAX_CORES; i++ {
 		if i%2 == 1 {
 			// skip SMT threads
 			continue
 		}
+
 		t, err := ioutil.ReadFile("/sys/devices/system/cpu/cpu" + strconv.Itoa(i) + "/topology/physical_package_id")
 		if err != nil {
 			break
 		}
 		coreToPackageMap[i], _ = strconv.Atoi(strings.TrimSpace(string(t)))
-		t, err = ioutil.ReadFile("/dev/cpu/" + strconv.Itoa(i) + "/msr")
+
+		fd, err := os.OpenFile("/dev/cpu/"+strconv.Itoa(i)+"/msr", os.O_RDONLY, 0600)
 		if err != nil {
 			log.Fatal(err)
 		}
-		coreMsrs[i] = t
+		coreMsrs[i] = fd
 	}
 
 	log.Println(coreToPackageMap)

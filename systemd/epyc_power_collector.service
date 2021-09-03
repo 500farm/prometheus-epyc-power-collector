@@ -1,0 +1,9 @@
+[Unit]
+Description=Epyc_Power_Collector
+
+[Service]
+ExecStart=/usr/local/bin/epyc_power_collector
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

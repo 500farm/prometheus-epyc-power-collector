@@ -32,7 +32,7 @@ func readMsr(msr *os.File, offset int64) uint64 {
 }
 
 func main() {
-	outputDir := os.Getenv("TEMP") + "/prometheus"
+	outputDir := os.TempDir() + "/prometheus"
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		log.Fatal(err)
 	}
@@ -65,48 +65,63 @@ func main() {
 	))
 
 	for {
-		coreEnergy := make(map[int]float64)
-		packageEnergy := make(map[int]float64)
+		coreEnergy1 := make(map[int]float64)
+		coreEnergy2 := make(map[int]float64)
+		packageEnergy1 := make(map[int]float64)
+		packageEnergy2 := make(map[int]float64)
 
 		start := time.Now()
 
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]
-			coreEnergy[i] = float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
-			packageEnergy[pkg] = float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			coreEnergy1[i] = float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			if _, ok := packageEnergy1[pkg]; !ok {
+				packageEnergy1[pkg] = float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			}
 		}
 
 		time.Sleep(5 * time.Second)
 		dt := time.Now().Sub(start).Seconds()
 
-		rollover := false
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]
-			coreEnergy[i] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
-			packageEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
-			if coreEnergy[i] > 0 || packageEnergy[pkg] > 0 {
-				// rollover - consider data invalid
-				rollover = true
+			v := float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+			if v < coreEnergy1[i] {
+				// fix rollover
+				v += 0xFFFFFFFF
+			}
+			coreEnergy2[i] = v
+			if _, ok := packageEnergy2[pkg]; !ok {
+				v := float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+				if v < packageEnergy1[pkg] {
+					// fix rollover
+					v += 0xFFFFFFFF
+				}
+				packageEnergy2[pkg] = v
 			}
 		}
 
-		if !rollover {
-			output := "# HELP node_cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
-				"# TYPE node_cpu_power_cores_watts gauge\n" +
-				"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
-				"# TYPE node_cpu_power_package_watts gauge\n"
+		output := "# HELP node_cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
+			"# TYPE node_cpu_power_cores_watts gauge\n" +
+			"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
+			"# TYPE node_cpu_power_package_watts gauge\n"
+		rollover := false
 
-			for pkg, w := range packageEnergy {
-				output += fmt.Sprintf("node_cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w*energyUnit/dt)
-				w1 := 0.0
-				for core, w2 := range coreEnergy {
-					if coreToPackageMap[core] == pkg {
-						w1 += w2
-					}
+		for pkg, w := range packageEnergy2 {
+			w -= packageEnergy1[pkg]
+			output += fmt.Sprintf("node_cpu_power_package_watts{package=\"%d\"} %f\n", pkg, w*energyUnit/dt)
+			w1 := 0.0
+			for core, w2 := range coreEnergy2 {
+				w2 -= coreEnergy1[core]
+				if coreToPackageMap[core] == pkg {
+					w1 += w2
 				}
-				output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w1*energyUnit/dt)
 			}
+			output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, w1*energyUnit/dt)
+		}
 
+		// if a rollover detected, consider data invalid and do not write it
+		if !rollover {
 			ioutil.WriteFile(outputFile, []byte(output), 0644)
 		}
 	}

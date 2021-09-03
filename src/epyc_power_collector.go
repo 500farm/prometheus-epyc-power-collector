@@ -55,26 +55,35 @@ func main() {
 		(readMsr(coreMsrs[0], AMD_MSR_PWR_UNIT)&AMD_ENERGY_UNIT_MASK)>>8,
 	))
 
-	packageCoresTotalEnergy := make(map[int]float64)
-	packageTotalEnergy := make(map[int]float64)
+	for {
+		packageCoresTotalEnergy := make(map[int]float64)
+		packageTotalEnergy := make(map[int]float64)
 
-	for i, msr := range coreMsrs {
-		pkg := coreToPackageMap[i]
-		packageCoresTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
-		packageTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
-	}
+		start := time.Now()
 
-	time.Sleep(100 * time.Millisecond)
+		for i, msr := range coreMsrs {
+			pkg := coreToPackageMap[i]
+			packageCoresTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
+			packageTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
+		}
 
-	for i, msr := range coreMsrs {
-		pkg := coreToPackageMap[i]
-		packageCoresTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
-		packageTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
-	}
+		time.Sleep(time.Second)
 
-	for pkg, w := range packageCoresTotalEnergy {
-		log.Printf("Package %d cores W: %f\n", pkg, -w*energy_unit)
-		w = packageTotalEnergy[pkg] / float64(len(coreMsrs))
-		log.Printf("Package %d total W: %f\n", pkg, -w*energy_unit)
+		for i, msr := range coreMsrs {
+			pkg := coreToPackageMap[i]
+			packageCoresTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY))
+			packageTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
+		}
+
+		for pkg, w := range packageCoresTotalEnergy {
+			w1 := packageTotalEnergy[pkg] / float64(len(coreMsrs))
+			dt := time.Now().Sub(start).Seconds()
+			log.Printf(
+				"Package %d cores/total W: %f/%f\n",
+				pkg,
+				-w*energy_unit*dt,
+				-w1*energy_unit*dt,
+			)
+		}
 	}
 }

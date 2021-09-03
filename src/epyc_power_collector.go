@@ -15,9 +15,7 @@ const AMD_MSR_PWR_UNIT = 0xC0010299
 const AMD_MSR_CORE_ENERGY = 0xC001029A
 const AMD_MSR_PACKAGE_ENERGY = 0xC001029B
 
-const AMD_TIME_UNIT_MASK = 0xF0000
 const AMD_ENERGY_UNIT_MASK = 0x1F00
-const AMD_POWER_UNIT_MASK = 0xF
 
 const MAX_CORES = 1024
 
@@ -53,42 +51,30 @@ func main() {
 		coreMsrs[i] = fd
 	}
 
-	log.Println(coreToPackageMap)
-	log.Println(coreMsrs)
+	energy_unit := math.Pow(0.5, float64(
+		(readMsr(coreMsrs[0], AMD_MSR_PWR_UNIT)&AMD_ENERGY_UNIT_MASK)>>8,
+	))
 
-	msr := coreMsrs[0]
-	core_energy_units := readMsr(msr, AMD_MSR_PWR_UNIT)
-	log.Printf("Core energy units: %x\n", core_energy_units)
-
-	time_unit := (core_energy_units & AMD_TIME_UNIT_MASK) >> 16
-	energy_unit := (core_energy_units & AMD_ENERGY_UNIT_MASK) >> 8
-	power_unit := core_energy_units & AMD_POWER_UNIT_MASK
-	log.Printf("Time_unit: %d, Energy_unit: %d, Power_unit: %d\n", time_unit, energy_unit, power_unit)
-
-	time_unit_d := math.Pow(0.5, float64(time_unit))
-	energy_unit_d := math.Pow(0.5, float64(energy_unit))
-	power_unit_d := math.Pow(0.5, float64(power_unit))
-	log.Printf("Time_unit: %g, Energy_unit: %g, Power_unit: %g\n", time_unit_d, energy_unit_d, power_unit_d)
-
-	packageCoresTotalEnergy := make(map[int]float64)
-	packageTotalEnergy := make(map[int]float64)
+	packageCoresTotalEnergy := make(map[int]uint64)
+	packageTotalEnergy := make(map[int]uint64)
 
 	for i, msr := range coreMsrs {
 		pkg := coreToPackageMap[i]
-		packageCoresTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_CORE_ENERGY)) * energy_unit_d
-		packageTotalEnergy[pkg] += float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY)) * energy_unit_d
+		packageCoresTotalEnergy[pkg] += readMsr(msr, AMD_MSR_CORE_ENERGY)
+		packageTotalEnergy[pkg] += readMsr(msr, AMD_MSR_PACKAGE_ENERGY)
 	}
 
 	time.Sleep(100 * time.Millisecond)
 
 	for i, msr := range coreMsrs {
 		pkg := coreToPackageMap[i]
-		packageCoresTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_CORE_ENERGY)) * energy_unit_d
-		packageTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY)) * energy_unit_d
+		packageCoresTotalEnergy[pkg] -= readMsr(msr, AMD_MSR_CORE_ENERGY)
+		packageTotalEnergy[pkg] -= readMsr(msr, AMD_MSR_PACKAGE_ENERGY)
 	}
 
 	for pkg, w := range packageCoresTotalEnergy {
-		log.Printf("Package %d cores W: %f\n", pkg, -w)
-		log.Printf("Package %d total W: %f\n", pkg, -packageTotalEnergy[pkg]/float64(len(coreMsrs)))
+		log.Printf("Package %d cores W: %f\n", pkg, -float64(w)*energy_unit)
+		w = packageTotalEnergy[pkg]
+		log.Printf("Package %d total W: %f\n", pkg, -float64(w)/float64(len(coreMsrs))*energy_unit)
 	}
 }

@@ -73,8 +73,9 @@ func main() {
 		start := time.Now()
 
 		for i, msr := range coreMsrs {
-			pkg := coreToPackageMap[i]
 			coreEnergy1[i] = float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
+
+			pkg := coreToPackageMap[i]
 			if _, ok := packageEnergy1[pkg]; !ok {
 				packageEnergy1[pkg] = float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
 			}
@@ -84,13 +85,14 @@ func main() {
 		dt := time.Now().Sub(start).Seconds()
 
 		for i, msr := range coreMsrs {
-			pkg := coreToPackageMap[i]
 			v := float64(readMsr(msr, AMD_MSR_CORE_ENERGY) & AMD_ENERGY_VALUE_MASK)
 			if v < coreEnergy1[i] {
 				// fix rollover
 				v += 0xFFFFFFFF
 			}
 			coreEnergy2[i] = v
+
+			pkg := coreToPackageMap[i]
 			if _, ok := packageEnergy2[pkg]; !ok {
 				v := float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY) & AMD_ENERGY_VALUE_MASK)
 				if v < packageEnergy1[pkg] {
@@ -105,7 +107,6 @@ func main() {
 			"# TYPE node_cpu_power_cores_watts gauge\n" +
 			"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
 			"# TYPE node_cpu_power_package_watts gauge\n"
-		rollover := false
 
 		for pkg, w := range packageEnergy2 {
 			w -= packageEnergy1[pkg]
@@ -120,9 +121,6 @@ func main() {
 			output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, w1*energyUnit/dt)
 		}
 
-		// if a rollover detected, consider data invalid and do not write it
-		if !rollover {
-			ioutil.WriteFile(outputFile, []byte(output), 0644)
-		}
+		ioutil.WriteFile(outputFile, []byte(output), 0644)
 	}
 }

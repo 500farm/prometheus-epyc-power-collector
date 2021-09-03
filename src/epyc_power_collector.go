@@ -70,6 +70,7 @@ func main() {
 
 		time.Sleep(5 * time.Second)
 		dt := time.Now().Sub(start).Seconds()
+		log.Printf("dt=%f\n", dt)
 
 		for i, msr := range coreMsrs {
 			pkg := coreToPackageMap[i]

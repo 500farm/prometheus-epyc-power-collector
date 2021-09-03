@@ -84,6 +84,14 @@ func main() {
 
 		for pkg, w := range packageCoresTotalEnergy {
 			w1 := packageTotalEnergy[pkg] / float64(len(coreMsrs))
+
+			log.Printf(
+				"Package %d cores/total W: %f/%f\n",
+				pkg,
+				-w*energy_unit*dt,
+				-w1*energy_unit*dt,
+			)
+
 			output += fmt.Sprintf("cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w*energy_unit*dt)
 			output += fmt.Sprintf("cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w1*energy_unit*dt)
 		}

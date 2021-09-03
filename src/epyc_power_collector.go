@@ -77,15 +77,15 @@ func main() {
 			packageTotalEnergy[pkg] -= float64(readMsr(msr, AMD_MSR_PACKAGE_ENERGY))
 		}
 
-		output := "# HELP cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
-			"# TYPE cpu_power_cores_watts gauge\n" +
-			"# HELP cpu_power_package_watts Average power consumption by this CPU\n" +
-			"# TYPE cpu_power_package_watts gauge\n"
+		output := "# HELP node_cpu_power_cores_watts Average power consumption by all cores of this CPU\n" +
+			"# TYPE node_cpu_power_cores_watts gauge\n" +
+			"# HELP node_cpu_power_package_watts Average power consumption by this CPU\n" +
+			"# TYPE node_cpu_power_package_watts gauge\n"
 
 		for pkg, w := range packageCoresTotalEnergy {
 			w1 := packageTotalEnergy[pkg] / float64(len(coreMsrs))
-			output += fmt.Sprintf("cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w*energyUnit/dt)
-			output += fmt.Sprintf("cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w1*energyUnit/dt)
+			output += fmt.Sprintf("node_cpu_power_cores_watts{package=\"%d\"} %f\n", pkg, -w*energyUnit/dt)
+			output += fmt.Sprintf("node_cpu_power_package_watts{package=\"%d\"} %f\n", pkg, -w1*energyUnit/dt)
 		}
 
 		ioutil.WriteFile("/tmp/prometheus/epyc_power_collector.prom", []byte(output), 0644)
